@@ -110,12 +110,14 @@
       brushSize = e.target.value;
     });
 
-    // Drawing on canvas
+    // Start drawing
     const startDrawing = (x, y) => {
       drawing = true;
+      ctx.beginPath();
       ctx.moveTo(x, y);
     };
 
+    // Draw on the canvas
     const draw = (x, y) => {
       if (!drawing) return;
 
@@ -131,7 +133,7 @@
       ctx.lineTo(x, y);
       ctx.stroke();
 
-      // Emit drawing data
+      // Emit drawing data to server
       socket.emit('drawing', { x, y, tool, brushSize });
     };
 
@@ -140,7 +142,7 @@
       ctx.beginPath(); // Reset path
     };
 
-    // Mouse events
+    // Mouse events for drawing
     canvas.addEventListener('mousedown', (e) => startDrawing(e.clientX - 200, e.clientY));
     canvas.addEventListener('mousemove', (e) => draw(e.clientX - 200, e.clientY));
     canvas.addEventListener('mouseup', stopDrawing);
@@ -159,7 +161,7 @@
 
       ctx.lineTo(data.x, data.y);
       ctx.stroke();
-      ctx.beginPath();
+      ctx.beginPath(); // Reset path for smoother updates
       ctx.moveTo(data.x, data.y);
     });
 
