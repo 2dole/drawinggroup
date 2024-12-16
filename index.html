@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Collaborative Drawing</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #leftPanel {
+      width: 200px;
+      background: #f4f4f4;
+      padding: 10px;
+      box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
+      display: flex;
+      flex-direction: column;
+      font-family: Arial, sans-serif;
+    }
+    #participants {
+      margin-top: 20px;
+      flex: 1;
+      overflow-y: auto;
+    }
+    #toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #toolbar button {
+      padding: 10px;
+      font-size: 16px;
+      border: none;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    #toolbar button.active {
+      background: #0056b3;
+    }
+    #toolbar input[type="range"] {
+      width: 100%;
+    }
+    canvas {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="leftPanel">
+    <h3>Participants</h3>
+    <div id="participants"></div>
+    <div id="toolbar">
+      <button id="toggleBrush" class="active">Brush</button>
+      <button id="toggleEraser">Eraser</button>
+      <label for="brushSize">Size:</label>
+      <input type="range" id="brushSize" min="1" max="20" value="5">
+    </div>
+  </div>
+  <canvas id="drawingCanvas"></canvas>
+  <script src="https://cdn.socket.io/4.5.1/socket.io.min.js"></script>
+  <script>
+    // DOM Elements
+    const canvas = document.getElementById('drawingCanvas');
+    const ctx = canvas.getContext('2d');
+    const participantsDiv = document.getElementById('participants');
+    const toggleBrush = document.getElementById('toggleBrush');
+    const toggleEraser = document.getElementById('toggleEraser');
+    const brushSizeSlider = document.getElementById('brushSize');
+
+    // Resize canvas
+    canvas.width = window.innerWidth - 200; // Account for left panel width
+    canvas.height = window.innerHeight;
+
+    let drawing = false;
+    let tool = 'brush'; // Current tool: 'brush' or 'eraser'
+    let brushSize = 5;  // Current brush/eraser size
+    let username = '';
+
+    // Prompt for username
+    do {
+      username = prompt('Enter your username:');
+    } while (!username);
+
+    // Connect to server
+    const socket = io();
+
+    // Send username to the server
+    socket.emit('join', username);
+
+    // Tool Selection
+    toggleBrush.addEventListener('click', () => {
+      tool = 'brush';
+      toggleBrush.classList.add('active');
+      toggleEraser.classList.remove('active');
+    });
+
+    toggleEraser.addEventListener('click', () => {
+      tool = 'eraser';
+      toggleEraser.classList.add('active');
+      toggleBrush.classList.remove('active');
+    });
+
+    // Brush/Eraser Size
+    brushSizeSlider.addEventListener('input', (e) => {
+      brushSize = e.target.value;
+    });
+
+    // Drawing on canvas
+    const startDrawing = (x, y) => {
+      drawing = true;
+      ctx.moveTo(x, y);
+    };
+
+    const draw = (x, y) => {
+      if (!drawing) return;
+
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = 'round';
+
+      if (tool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out'; // Erase
+      } else {
+        ctx.globalCompositeOperation = 'source-over'; // Draw
+      }
+
+      ctx.lineTo(x, y);
+      ctx.stroke();
+
+      // Emit drawing data
+      socket.emit('drawing', { x, y, tool, brushSize });
+    };
+
+    const stopDrawing = () => {
+      drawing = false;
+      ctx.beginPath(); // Reset path
+    };
+
+    // Mouse events
+    canvas.addEventListener('mousedown', (e) => startDrawing(e.clientX - 200, e.clientY));
+    canvas.addEventListener('mousemove', (e) => draw(e.clientX - 200, e.clientY));
+    canvas.addEventListener('mouseup', stopDrawing);
+    canvas.addEventListener('mouseleave', stopDrawing);
+
+    // Handle incoming drawing data
+    socket.on('drawing', (data) => {
+      ctx.lineWidth = data.brushSize;
+      ctx.lineCap = 'round';
+
+      if (data.tool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out'; // Erase
+      } else {
+        ctx.globalCompositeOperation = 'source-over'; // Draw
+      }
+
+      ctx.lineTo(data.x, data.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(data.x, data.y);
+    });
+
+    // Update participants list
+    socket.on('participants', (participants) => {
+      participantsDiv.innerHTML = ''; // Clear the list
+      participants.forEach((participant) => {
+        const div = document.createElement('div');
+        div.textContent = participant; // Display each username
+        participantsDiv.appendChild(div);
+      });
+    });
+
+    // Emit username on joining
+    socket.emit('join', username);
+  </script>
+  <script>
+    // Server logic
+    (() => {
+      const serverCode = `
+        const http = require('http');
+        const { Server } = require('socket.io');
+
+        const server = http.createServer();
+        const io = new Server(server);
+
+        let participants = [];
+
+        io.on('connection', (socket) => {
+          let username = '';
+
+          // Handle user joining
+          socket.on('join', (name) => {
+            username = name;
+            participants.push(username);
+            io.emit('participants', participants); // Broadcast updated participants
+          });
+
+          // Handle drawing data
+          socket.on('drawing', (data) => {
+            socket.broadcast.emit('drawing', data);
+          });
+
+          // Handle user disconnecting
+          socket.on('disconnect', () => {
+            participants = participants.filter((user) => user !== username);
+            io.emit('participants', participants); // Broadcast updated participants
+          });
+        });
+
+        server.listen(3000, () => {
+          console.log('Server running on http://localhost:3000');
+        });
+      `;
+
+      const blob = new Blob([serverCode], { type: 'text/javascript' });
+      const url = URL.createObjectURL(blob);
+
+      const script = document.createElement('script');
+      script.src = url;
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+</html>
